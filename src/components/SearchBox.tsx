@@ -1,16 +1,51 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search } from 'lucide-react';
-import { products, Product } from '../data';
 
-const SearchBox: React.FC = () => {
+interface SearchItem {
+  [key: string]: any;
+}
+
+interface SearchBoxProps<T extends SearchItem> {
+  items: T[];
+  onSearch?: (query: string, results: T[]) => void;
+  placeholder?: string;
+  searchFields: string[];
+  displayFields: string[];
+  valueField?: string;
+  maxResults?: number;
+  highlightField?: string;
+  rightField?: string;
+  rightFieldLabel?: string;
+}
+
+function SearchBox<T extends SearchItem>({
+  items,
+  onSearch,
+  placeholder = "Search...",
+  searchFields,
+  displayFields,
+  valueField,
+  maxResults = 10,
+  highlightField,
+  rightField,
+  rightFieldLabel
+}: SearchBoxProps<T>) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Product[]>([]);
+  const [results, setResults] = useState<T[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const prevQueryRef = useRef<string>(query);
 
   useEffect(() => {
+    // Skip if the query hasn't changed to prevent infinite loops
+    if (prevQueryRef.current === query) {
+      return;
+    }
+    
+    prevQueryRef.current = query;
+
     if (query.trim() === '') {
       setResults([]);
       return;
@@ -18,20 +53,21 @@ const SearchBox: React.FC = () => {
 
     const searchTerms = query.toLowerCase().split(' ').filter(term => term.length > 0);
     
-    const filteredResults = products.filter(product => {
-      const itemName = product.ItemName.toLowerCase();
-      const uid = product.UID.toLowerCase().trim();
-      const pid = product.PID.toString();
-      
+    const filteredResults = items.filter(item => {
       return searchTerms.every(term => 
-        itemName.includes(term) || 
-        uid.includes(term) || 
-        pid.includes(term)
+        searchFields.some(field => {
+          const value = String(item[field] || '').toLowerCase();
+          return value.includes(term);
+        })
       );
-    }).slice(0, 10); // Limit to 10 results for performance
+    }).slice(0, maxResults);
     
     setResults(filteredResults);
-  }, [query]);
+    
+    if (onSearch) {
+      onSearch(query, filteredResults);
+    }
+  }, [query, items, searchFields, maxResults, onSearch]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -57,7 +93,7 @@ const SearchBox: React.FC = () => {
       e.preventDefault();
       const selected = results[selectedIndex];
       if (selected) {
-        setQuery(selected.ItemName);
+        setQuery(valueField ? String(selected[valueField] || '') : String(selected[displayFields[0]] || ''));
         setIsSearching(false);
       }
     } else if (e.key === 'Escape') {
@@ -72,8 +108,6 @@ const SearchBox: React.FC = () => {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setIsSearching(false);
-    // Here you would typically handle the search submission
-    console.log('Searching for:', query);
   };
 
   const highlightMatch = (text: string, query: string) => {
@@ -83,7 +117,7 @@ const SearchBox: React.FC = () => {
     const parts = text.split(regex);
     
     return parts.map((part, index) => 
-      regex.test(part) ? <span key={index} className="bg-yellow-200">{part}</span> : part
+      regex.test(part) ? <span key={`highlight-${index}`} className="bg-yellow-200">{part}</span> : part
     );
   };
 
@@ -98,7 +132,7 @@ const SearchBox: React.FC = () => {
             onChange={(e) => setQuery(e.target.value)}
             onFocus={handleFocus}
             onKeyDown={handleKeyDown}
-            placeholder="Search for products..."
+            placeholder={placeholder}
             className="w-full px-4 py-3 pl-12 pr-10 text-gray-700 bg-white border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
           <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
@@ -120,30 +154,51 @@ const SearchBox: React.FC = () => {
       {isSearching && results.length > 0 && (
         <div className="absolute z-10 w-full mt-1 bg-white rounded-md shadow-lg">
           <ul className="py-1 overflow-auto text-base max-h-60">
-            {results.map((product, index) => (
-              <li
-                key={product.PID}
-                className={`px-4 py-2 cursor-pointer hover:bg-gray-100 ${
-                  index === selectedIndex ? 'bg-gray-100' : ''
-                }`}
-                onClick={() => {
-                  setQuery(product.ItemName);
-                  setIsSearching(false);
-                }}
-              >
-                <div className="flex justify-between">
-                  <div>
-                    <div className="font-medium">{highlightMatch(product.ItemName, query)}</div>
-                    <div className="text-sm text-gray-500">
-                      PID: {product.PID} | UID: {product.UID.trim()}
+            {results.map((item, index) => {
+              // Create a unique key for each item
+              const itemKey = `result-${index}-${item[displayFields[0]] || index}`;
+              
+              return (
+                <li
+                  key={itemKey}
+                  className={`px-4 py-2 cursor-pointer hover:bg-gray-100 ${
+                    index === selectedIndex ? 'bg-gray-100' : ''
+                  }`}
+                  onClick={() => {
+                    const selectedValue = valueField 
+                      ? String(item[valueField] || '') 
+                      : String(item[displayFields[0]] || '');
+                    setQuery(selectedValue);
+                    setIsSearching(false);
+                    if (onSearch) {
+                      onSearch(selectedValue, [item]);
+                    }
+                  }}
+                >
+                  <div className="flex justify-between">
+                    <div>
+                      {displayFields.map((field, idx) => {
+                        const fieldKey = `${itemKey}-field-${idx}`;
+                        return (
+                          <div key={fieldKey} className={idx === 0 ? "font-medium" : "text-sm text-gray-500"}>
+                            {idx === 0 && highlightField 
+                              ? highlightMatch(String(item[highlightField] || ''), query) 
+                              : idx === 0 
+                                ? highlightMatch(String(item[field] || ''), query)
+                                : `${field.replace(/([A-Z])/g, ' $1').trim()}: ${String(item[field] || '')}`}
+                          </div>
+                        );
+                      })}
                     </div>
+                    {rightField && item[rightField] !== undefined && (
+                      <div className="text-sm font-semibold text-blue-600">
+                        {rightFieldLabel ? `${rightFieldLabel}: ` : ''}{String(item[rightField])}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-sm font-semibold text-blue-600">
-                    Stock: {product.Balance}
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -151,12 +206,12 @@ const SearchBox: React.FC = () => {
       {isSearching && query && results.length === 0 && (
         <div className="absolute z-10 w-full mt-1 bg-white rounded-md shadow-lg">
           <div className="px-4 py-3 text-sm text-gray-700">
-            No products found matching "{query}"
+            No results found matching "{query}"
           </div>
         </div>
       )}
     </div>
   );
-};
+}
 
 export default SearchBox;
