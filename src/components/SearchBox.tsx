@@ -36,7 +36,14 @@ function SearchBox<T extends SearchItem>({
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const resultsListRef = useRef<HTMLUListElement>(null);
+  const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
   const prevQueryRef = useRef<string>(query);
+
+  // Initialize or resize the itemRefs array when results change
+  useEffect(() => {
+    itemRefs.current = itemRefs.current.slice(0, results.length);
+  }, [results]);
 
   useEffect(() => {
     // Skip if the query hasn't changed to prevent infinite loops
@@ -81,6 +88,32 @@ function SearchBox<T extends SearchItem>({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Scroll the selected item into view when selectedIndex changes
+  useEffect(() => {
+    if (selectedIndex >= 0 && itemRefs.current[selectedIndex]) {
+      const selectedItem = itemRefs.current[selectedIndex];
+      if (selectedItem && resultsListRef.current) {
+        // Get the container's scroll position and dimensions
+        const container = resultsListRef.current;
+        const containerTop = container.scrollTop;
+        const containerBottom = containerTop + container.clientHeight;
+        
+        // Get the item's position relative to the container
+        const itemTop = selectedItem.offsetTop;
+        const itemBottom = itemTop + selectedItem.clientHeight;
+        
+        // Scroll if the item is not fully visible
+        if (itemTop < containerTop) {
+          // Item is above visible area - scroll up to show it
+          container.scrollTop = itemTop;
+        } else if (itemBottom > containerBottom) {
+          // Item is below visible area - scroll down to show it
+          container.scrollTop = itemBottom - container.clientHeight;
+        }
+      }
+    }
+  }, [selectedIndex]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -153,13 +186,14 @@ function SearchBox<T extends SearchItem>({
 
       {isSearching && results.length > 0 && (
         <div className="absolute z-10 w-full mt-1 bg-white rounded-md shadow-lg">
-          <ul className="py-1 overflow-auto text-base max-h-60">
+          <ul ref={resultsListRef} className="py-1 overflow-auto text-base max-h-60">
             {results.map((item, index) => {
               // Create a unique key for each item
               const itemKey = `result-${index}-${item[displayFields[0]] || index}`;
               
               return (
                 <li
+                  ref={el => itemRefs.current[index] = el}
                   key={itemKey}
                   className={`px-4 py-2 cursor-pointer hover:bg-gray-100 ${
                     index === selectedIndex ? 'bg-gray-100' : ''
